@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask Chat</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #343a40;
+            color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        #chat-container {
+            width: 80%;
+            height: 90%;
+            background: #212529;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        #messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+
+        .message {
+            display: flex;
+            align-items: flex-end;
+            margin-bottom: 20px;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 10px 15px;
+            border-radius: 15px;
+            background-color: #495057;
+            color: #f8f9fa;
+        }
+
+        .message.user .message-content {
+            background-color: #0d6efd;
+            color: #fff;
+        }
+
+        #input-container {
+            display: flex;
+            padding-top: 20px;
+            border-top: 1px solid #495057;
+        }
+
+        #message-input {
+            flex: 1;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #495057;
+            color: #f8f9fa;
+            margin-right: 10px;
+        }
+
+        #send-button {
+            padding: 10px 20px;
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #send-button:hover {
+            background-color: #0b5ed7;
+        }
+
+        .feedback-message {
+            width: 100%;
+            background-color: #6c757d;
+            border-radius: 15px;
+            padding: 10px;
+            color: #f8f9fa;
+            margin-top: 10px;
+        }
+
+        .feedback-message .form-check,
+        .feedback-message .form-label {
+            color: #f8f9fa;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark w-100" style="padding: 10px 20px;">
+        <a class="navbar-brand" href="/">ADQL Generator</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="/">Chat</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/dashboard">Dashboard</a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <br></br>
+
+    <div id="chat-container">
+        <div id="messages"></div>
+        <div id="input-container">
+            <input id="message-input" type="text" class="form-control" placeholder="Type your message...">
+            <button id="send-button" class="btn btn-primary">Send</button>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS and dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        var socket = io();
+        var feedbackMessageElement = null;
+        var lastUserMessage = '';  // Store the last user's message
+        var lastBotResponse = '';  // Store the last bot's response
+
+        // Listen for messages from the server
+        socket.on('message', function (msg) {
+            if (botTypingMessageElement) {
+                botTypingMessageElement.querySelector('.message-content').textContent = msg;
+                botTypingMessageElement = null;
+            } else {
+                var messages = document.getElementById('messages');
+                var messageElement = document.createElement('div');
+                messageElement.classList.add('message', 'assistant');
+
+                var messageContent = document.createElement('div');
+                messageContent.classList.add('message-content');
+                messageContent.textContent = msg;
+
+                messageElement.appendChild(messageContent);
+                messages.appendChild(messageElement);
+                messages.scrollTop = messages.scrollHeight;
+            }
+
+            lastBotResponse = msg;  // Store the bot's response
+
+            // Insert the feedback form as a message after the bot response
+            insertFeedbackForm();
+        });
+
+        // Send messages to the server
+        document.getElementById('send-button').onclick = function () {
+            var messageInput = document.getElementById('message-input');
+            var message = messageInput.value;
+            if (message) {
+                lastUserMessage = message;  // Store the user's message
+
+                socket.send(message);
+
+                var userMessageElement = document.createElement('div');
+                userMessageElement.classList.add('message', 'user');
+
+                var messageContent = document.createElement('div');
+                messageContent.classList.add('message-content');
+                messageContent.textContent = "You: " + message;
+
+                userMessageElement.appendChild(messageContent);
+                document.getElementById('messages').appendChild(userMessageElement);
+
+                messageInput.value = '';
+
+                // Show "Generating ADQL..." message
+                var messages = document.getElementById('messages');
+                botTypingMessageElement = document.createElement('div');
+                botTypingMessageElement.classList.add('message', 'assistant');
+                var botTypingContent = document.createElement('div');
+                botTypingContent.classList.add('message-content');
+                botTypingContent.textContent = "Generating ADQL...";
+                botTypingMessageElement.appendChild(botTypingContent);
+                messages.appendChild(botTypingMessageElement);
+                messages.scrollTop = messages.scrollHeight;
+
+                // Remove feedback form if it exists
+                if (feedbackMessageElement) {
+                    feedbackMessageElement.remove();
+                    feedbackMessageElement = null;
+                }
+            }
+        };
+
+        // Send message on Enter key press
+        document.getElementById('message-input').addEventListener('keypress', function (event) {
+            if (event.key === 'Enter') {
+                document.getElementById('send-button').click();
+            }
+        });
+
+        // Insert feedback form in the chat
+        function insertFeedbackForm() {
+            var messages = document.getElementById('messages');
+            feedbackMessageElement = document.createElement('div');
+            feedbackMessageElement.classList.add('feedback-message');
+
+            feedbackMessageElement.innerHTML = `
+                <form id="feedback-form">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="correct">
+                        <label class="form-check-label" for="correct">Correct?</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="straight_forward">
+                        <label class="form-check-label" for="straight_forward">Straight forward?</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="missing_column">
+                        <label class="form-check-label" for="missing_column">Missing Column?</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="spelling_error">
+                        <label class="form-check-label" for="spelling_error">Spelling Error?</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="alternate_column">
+                        <label class="form-check-label" for="alternate_column">Alternate column name?</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="alternate_value">
+                        <label class="form-check-label" for="alternate_value">Alternate Value?</label>
+                    </div>
+                    <div class="mb-3">
+                        <label for="correct_adql" class="form-label">Correct ADQL query (optional):</label>
+                        <textarea class="form-control bg-dark text-light" id="correct_adql" rows="3"></textarea>
+                    </div>
+                    <button type="button" id="submit-feedback" class="btn btn-primary">Submit Feedback</button>
+                </form>
+            `;
+
+            messages.appendChild(feedbackMessageElement);
+            messages.scrollTop = messages.scrollHeight;
+
+            // Handle feedback form submission
+            document.getElementById('submit-feedback').onclick = function () {
+                var correct = document.getElementById('correct').checked;
+                var straight_forward = document.getElementById('straight_forward').checked;
+                var missing_column = document.getElementById('missing_column').checked;
+                var spelling_error = document.getElementById('spelling_error').checked;
+                var alternate_column = document.getElementById('alternate_column').checked;
+                var alternate_value = document.getElementById('alternate_value').checked;
+                var correct_adql = document.getElementById('correct_adql').value;
+
+                var feedbackData = {
+                    correct: correct,
+                    straight_forward: straight_forward,
+                    missing_column: missing_column,
+                    spelling_error: spelling_error,
+                    alternate_column: alternate_column,
+                    alternate_value: alternate_value,
+                    correct_adql: correct_adql,
+                    original_question: lastUserMessage,
+                    generated_sql: lastBotResponse
+                };
+
+                fetch('/submit-feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(feedbackData)
+                }).then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert('Feedback submitted successfully!');
+                            feedbackMessageElement.remove();
+                            feedbackMessageElement = null;
+                        } else {
+                            alert('Error submitting feedback: ' + data.message);
+                        }
+                    });
+            };
+        }
+    </script>
+
+</body>
+
+</html>
