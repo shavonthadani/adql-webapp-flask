@@ -25,7 +25,7 @@ def dashboard():
     df = pd.DataFrame(feedback_data)
 
     # Calculate the percentage of correct SQL queries based on categories
-    categories = ['missing_column', 'spelling_error', 'alternate_column', 'alternate_value']
+    categories = ['missing_column', 'spelling_error', 'alternate_column', 'alternate_value', 'straight_forward']
     percentages = []
     counts = []
 
@@ -96,4 +96,4 @@ def submit_feedback():
         return jsonify({"status": "error", "message": str(e)}), 500
     
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
