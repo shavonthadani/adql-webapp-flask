@@ -117,14 +117,16 @@ def handle_message(msg):
     user_sessions[session_id]["messages"].append({"role": "user", "content": msg})
 
     # Call the bot agent to generate a response
-    response = bot.agent.run(session_id, msg).strip("Successful!")
-
+    response, df = bot.agent.run(session_id, msg)
+    print(df)
+    df_html = df.to_html(classes='table table-dark table-striped')
+    print(df_html)
     # Store bot response
     user_sessions[session_id]["messages"].append({"role": "assistant", "content": response})
     firestore.db.collection("user_questions").add({"question": msg})
 
     # Send bot response back to the client
-    emit('message', response, room=session_id)
+    emit('message', {'response': response, 'table': df_html}, room=session_id)
 
 @app.route('/submit-feedback', methods=['POST'])
 def submit_feedback():

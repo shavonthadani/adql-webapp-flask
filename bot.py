@@ -427,7 +427,8 @@ You must use the tools in the following order. Do not pass a column into checkCo
 # Define a prompt template to generate SQL from natural language questions
 template = """
 You are an expert SQL query generator. Given a natural language question and a table schema, generate an appropriate SQL query.
-Only return the SQL query and nothing else.
+Only return the SQL query and nothing else. You need to always join the plane and observation tables on obsID. 
+You also always need to make sure that publisherID from the Plane table is always selected. Always limit to 5 rows.
 {schema}
 Question: {question}
 SQL Query:
@@ -456,7 +457,57 @@ class SQLAgent:
         self.sql_generator = sql_generator
         self.max_retries = 3
         self.preprocessAgent = self.createPreprocessAgent()
+    def runSqlQuery(self, sql_code: str) -> (pd.DataFrame, dict, list):
+        """Returns a Pandas DataFrame containing the results of a SQL query and metadata from the XML."""
+        base_url = 'https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/argus/sync?LANG=ADQL&QUERY='
+        sql_code = sql_code.strip(';')
+        sql_code = sql_code.replace("plane","caom2.Plane")
+        sql_code = sql_code.replace("observation","caom2.Observation")
+        encoded_sql = sql_code.replace(' ', '%20')
+        print(sql_code)
+        url = f"{base_url}{encoded_sql}%3B"
 
+        headers = {'Accept': 'application/x-votable+xml'}
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            raise Exception(f"Error: Received status code {response.status_code}")
+        
+        # Parse the XML response
+        root = ET.fromstring(response.content)
+        
+        # Check query status
+        status_element = root.find('.//{http://www.ivoa.net/xml/VOTable/v1.3}INFO[@name="QUERY_STATUS"]')
+        status = status_element.attrib.get('value')
+        if status == "ERROR":
+            error_message = status_element.text
+            raise Exception(f"Error from server: {error_message}")
+        
+        # Extract table data: rows (TR) and column names (FIELD)
+        rows = root.findall('.//{http://www.ivoa.net/xml/VOTable/v1.3}TR')
+        columns = [field.attrib['name'] for field in root.findall('.//{http://www.ivoa.net/xml/VOTable/v1.3}FIELD')]
+        data = [[td.text for td in row.findall('{http://www.ivoa.net/xml/VOTable/v1.3}TD')] for row in rows]
+        df = pd.DataFrame(data, columns=columns)
+
+        # Extract DataLink-related metadata (RESOURCE section)
+        datalink_metadata = {}
+        resources = root.findall('.//{http://www.ivoa.net/xml/VOTable/v1.3}RESOURCE')
+        for resource in resources:
+            if resource.attrib.get('type') == 'meta':  # Looking for the specific <RESOURCE type="meta">
+                for param in resource.findall('.//{http://www.ivoa.net/xml/VOTable/v1.3}PARAM'):
+                    param_name = param.attrib.get('name')
+                    param_value = param.attrib.get('value')
+                    datalink_metadata[param_name] = param_value
+        
+        # Construct DataLink URLs using the publisherID column
+        if 'accessURL' in datalink_metadata:
+            base_datalink_url = datalink_metadata['accessURL']
+            df['datalink_url'] = df['publisherID'].apply(lambda pub_id: f"{base_datalink_url}?ID={pub_id}")
+        else:
+            df['datalink_url'] = None  # Set as None if no accessURL is available
+
+        # Return the DataFrame and metadata (no need to return URLs separately as they're now in the DataFrame)
+        return df
     def createPreprocessAgent(self):
         # Choose the LLM to use
         llm2 = ChatOpenAI(model="gpt-4o-mini")
@@ -466,7 +517,9 @@ class SQLAgent:
 
 
         # set the tools
-        tools = [alternateColumn,checkColumns, alternateValue, checkValuesForCommonColumns]
+        #tools = [alternateColumn,checkColumns, alternateValue, checkValuesForCommonColumns]
+        # Temporary: Removing checkColumns for now
+        tools = [alternateColumn, alternateValue, checkValuesForCommonColumns]
 
         # Construct the ReAct agent
         agent = create_react_agent(llm2, tools, prompt_template)
@@ -525,7 +578,9 @@ class SQLAgent:
                 print(f"Attempt {attempt+1}: Generated query: {sql_query}")
                 previous_queries.append(sql_query)
                 # Run the generated SQL query using the tool
-                return self.sql_tool.invoke(sql_query)
+                self.sql_tool.invoke(sql_query)
+                df = self.runSqlQuery(sql_query)
+                return sql_query, df
             except Exception as e:
                 error_message = str(e)
                 print(f"Attempt {attempt+1}: Error encountered: {error_message}")
