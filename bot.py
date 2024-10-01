@@ -26,7 +26,9 @@ from langchain_openai import OpenAI
 from langchain import PromptTemplate
 from langchain.agents import initialize_agent 
 import mock_db
+import json
 
+# OpenAI Key
 
 
 ##### CREATING MOCK DATABASE #####
@@ -37,6 +39,32 @@ db_path = 'obsplane_db.sqlite'
 db_thread = mock_db.threading.Thread(target=mock_db.db_worker, args=(db_queue, db_path))
 db_thread.start()
 
+session_id = ""
+# Messaging to Flask App
+def send_request_to_flask(question):
+    print("Session id is: " + session_id)
+    # Set the URL
+    url = "http://34.130.36.57/ask-user"
+
+    # Define the headers
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    # Define the data
+    data = {
+        "question": question,
+        "session_id": session_id
+    }
+
+    # Send the POST request
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+
+    # Print the response
+    print(response.status_code)
+    print(response.text)
+    response_data = response.json()
+    return response_data['response']
 # Create tables
 mock_db.create_tables(db_queue)
 
@@ -118,7 +146,8 @@ def checkColumns(columns: str) -> str:
             query = "What is the most similar to " + column + "?"
             matching_docs = valid_columns_vector_db.similarity_search(query)
             page_contents = [doc.page_content for doc in matching_docs[:10]]
-            result[column] = "column does not exist, try one of these" + str(page_contents)
+            user_response = send_request_to_flask("column does not exist, do you want to use one of these?" + str(page_contents) + " Please enter a correct column")
+            result[column] =  column + " does not exist, the correct column is " + user_response
             continue
         if column in obs_columns_set:
             result[column] = "In Observation table"
@@ -477,7 +506,10 @@ class SQLAgent:
         sql_query = response_content
         return sql_query
 
-    def run(self, question: str) -> pd.DataFrame:
+    def run(self, conv_id: str, question: str) -> pd.DataFrame:
+        global session_id
+        session_id = conv_id
+        print("Session id is: (from class) " + session_id)
         schema = combined_schema_str
         error_messages = []
         previous_queries = []

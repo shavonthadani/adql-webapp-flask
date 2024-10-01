@@ -1,0 +1,1 @@
+event, http://www.opencadc.org/caom2/DataProductType#catalog, visibility, image, measurements, cube, spectrum, timeseries

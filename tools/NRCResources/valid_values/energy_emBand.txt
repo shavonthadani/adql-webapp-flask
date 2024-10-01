@@ -1,0 +1,1 @@
+Infrared|Optical, Infrared, Radio, Infrared|Optical|UV, Infrared|Optical|UV|EUV|X-ray|Gamma-ray, Millimeter|Infrared, Optical|UV|EUV|X-ray|Gamma-ray, UV|EUV, Optical|UV, Infrared|Optical|UV|EUV, Optical, X-ray, UV|EUV|X-ray, Optical|UV|EUV|X-ray, Optical|UV|EUV, Millimeter, UV

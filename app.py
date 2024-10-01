@@ -1,16 +1,58 @@
 from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, send
+from flask_socketio import SocketIO, send, emit
 import bot  # Import your bot module
 import firestore
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.io as pio
+import time
 
 app = Flask(__name__)
 socketio = SocketIO(app)
 
 # In-memory storage for session-like behavior
 user_sessions = {}
+
+@app.route('/ask-user', methods=['POST'])
+def ask_user():
+    # Get the request data, including the session ID
+    data = request.json
+    question = data.get('question', 'No question provided')
+    session_id = data.get('session_id')
+
+    if session_id not in user_sessions:
+        return jsonify({"error": "Session ID not found"}), 404
+
+    # Emit the clarification question to the specific user's session via SocketIO
+    socketio.emit('clarification_request', {'question': question}, room=session_id)
+
+    # Wait for the user's response (we'll store it in user_sessions)
+    timeout = 30  # Maximum time to wait for the user's response (in seconds)
+    start_time = time.time()
+
+    while 'response' not in user_sessions[session_id]:
+        # Check if the timeout has passed
+        if time.time() - start_time > timeout:
+            return jsonify({"error": "User did not respond in time"}), 408
+        time.sleep(1)  # Sleep briefly to avoid busy waiting
+
+    # Get the user's response from the session
+    user_response = user_sessions[session_id].pop('response')  # Remove after reading
+
+    # Return the response back to the bot
+    return jsonify({"response": user_response})
+
+@socketio.on('user_response')
+def handle_user_response(data):
+    session_id = request.sid
+    user_response = data.get('response')
+
+    # Store the user's response in the session
+    if session_id in user_sessions:
+        user_sessions[session_id]['response'] = user_response
+
+    # Optionally, send a confirmation back to the user
+    emit('message', {'response': f'Thanks for your response: {user_response}'}, room=session_id)
 
 @app.route('/dashboard')
 def dashboard():
@@ -75,13 +117,14 @@ def handle_message(msg):
     user_sessions[session_id]["messages"].append({"role": "user", "content": msg})
 
     # Call the bot agent to generate a response
-    response = bot.agent.run(msg).strip("Successful!")
+    response = bot.agent.run(session_id, msg).strip("Successful!")
 
     # Store bot response
     user_sessions[session_id]["messages"].append({"role": "assistant", "content": response})
     firestore.db.collection("user_questions").add({"question": msg})
+
     # Send bot response back to the client
-    send(response)
+    emit('message', response, room=session_id)
 
 @app.route('/submit-feedback', methods=['POST'])
 def submit_feedback():

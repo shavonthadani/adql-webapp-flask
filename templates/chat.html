@@ -145,10 +145,11 @@
     <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
     <script>
-        var socket = io();
+        var socket = io();  // Initialize only one socket connection
         var feedbackMessageElement = null;
         var lastUserMessage = '';  // Store the last user's message
         var lastBotResponse = '';  // Store the last bot's response
+        var botTypingMessageElement = null;  // Track bot typing message
 
         // Listen for messages from the server
         socket.on('message', function (msg) {
@@ -182,7 +183,7 @@
             if (message) {
                 lastUserMessage = message;  // Store the user's message
 
-                socket.send(message);
+                socket.send(message);  // Emit the message to the server
 
                 var userMessageElement = document.createElement('div');
                 userMessageElement.classList.add('message', 'user');
@@ -305,6 +306,19 @@
                     });
             };
         }
+
+        // Listen for clarification requests from the server
+        socket.on('clarification_request', function (data) {
+            var question = data.question;
+
+            // Display a popup asking for user input
+            var userResponse = prompt(question);
+
+            if (userResponse) {
+                // Send the response back to the server (through WebSocket)
+                socket.emit('user_response', { response: userResponse });
+            }
+        });
     </script>
 
 </body>
