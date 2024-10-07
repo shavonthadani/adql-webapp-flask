@@ -21,7 +21,7 @@ from langchain_community.document_loaders import PyPDFLoader
 import langsmith
 import pandas as pd
 import xml.etree.ElementTree as ET
-from langchain.agents import AgentExecutor, create_react_agent
+from langchain.agents import AgentExecutor, create_react_agent, create_openai_tools_agent
 from langchain_openai import OpenAI
 from langchain import PromptTemplate
 from langchain.agents import initialize_agent 
@@ -129,7 +129,7 @@ def strip_non_alphanumeric(s: str) -> str:
     return re.sub(r'^\W+|\W+$', '', s)
 
 @tool
-def checkColumns(columns: str) -> str:
+def checkColumnTable(columns: str) -> str:
     """Accepts a string of columns separated by comas and checks which table the columns belong to. It returns a string representation of a dictionary where the key is the column and the value is either {column does not exist, In Observation table, In Plane table} """
     print("checked columns")
     print("columns")
@@ -301,11 +301,11 @@ types = Chroma.from_documents(types, OpenAIEmbeddings(),collection_name="types")
 column_dbs = {"calibrationLevel": calibrationLevel, "collection": collection,"dataProductType": dataProductType,"energy_bandpassName":energy_bandpassName,"energy_emBand":energy_emBand,"instrument_name":instrument_name,"intent":intent, "telescope_name":telescope_name, "type":types}
 
 @tool
-def checkValuesForCommonColumns(columnAndValue: str) -> str:
+def valueExistInColumn(columnAndValue: str) -> str:
    """Accepts a string of a column name and value name separated by a comma. This tool checks if the value exists in the column and returns a string indicating if it exists or and if not returns a value that does exist that is the most similar. This tool is only valid for the following columns:instrument_name,calibrationLevel,type,energy_emBand,collection,energy_bandpassName,telescope_name,dataProductType,intent} """
    column = columnAndValue.split(",")[0]
    value = columnAndValue.split(",")[1]
-   print("checkValuesForCommonColumns")
+   print("valueExistInColumn")
    print("column")
    print(column)
    print("value")
@@ -386,42 +386,6 @@ plane_schema['Table'] = 'plane'
 # format schemas into a string to pass to sql generator
 combined_schema_str = format_schemas(obs_schema, plane_schema)
 
-#### React Prompt ####
-def get_react_prompt_template():
-    # Get the react prompt template
-    return PromptTemplate.from_template("""Answer the following questions as accurately as possible. Your primary task is to enhance the user's input by ensuring it is complete, accurate, and consistent with the database schema. You will need to augment and improve the input to add the correct table names to the prompt, change or swap out any incorrect column names and change any values that have an alternate value. To achieve this, follow these instructions carefully:
-It is important to know that there are only two tables in the database: observation and plane. They are joined on the obsID column. When you enhance the user's input mention the table names along with the corresponding column names and values that the user is requesting. If the user is requesting data from both tables enhance the user's input to include the join condition.
-
-You must never generate sql code. Only enhance the user's input.
-**Instructions:**
-You must use the tools in the following order. Do not pass a column into checkColumns without before passing it into alternateColumn to see if it needs to be changed.
-1. **alternateColumn**: Always start by verifying if any column names in the user's input need to be updated or corrected based on the database schema. Use this tool to find the correct column names if needed.
-2. **checkColumns**: Next, ensure that all mentioned columns exist in the specified table(s). Confirm which columns belong to which table(s) and that the columns in the user's input are valid.
-3. **alternateValue**: Use this tool to check if any values (like specific names or IDs) in the user's input need to be corrected. Use this tool to verify and update values as necessary.
-4. **checkValuesForCommonColumns**: Finally use this tool to check to see if a value exists in a column. The output will indicate if the value exists or if it does not exist.
-**Important:** You must use these tools in the order provided for every query.
-
-
-    You have access to the following tools:
-
-    {tools}
-
-    Use the following format:
-
-    Question: the input question you must answer
-    Thought: you should always think about what to do
-    Action: the action to take, should be one of [{tool_names}]
-    Action Input: the input to the action
-    Observation: the result of the action
-    ... (this Thought/Action/Action Input/Observation can repeat N times)
-    Thought: I now know the final answer
-    Final Answer: the final answer to the original input question
-
-    Begin!
-
-    Question: {input}
-    Thought:{agent_scratchpad}
-    """)
 
 #### Creating Agent ####
 # Define a prompt template to generate SQL from natural language questions
@@ -429,6 +393,7 @@ template = """
 You are an expert SQL query generator. Given a natural language question and a table schema, generate an appropriate SQL query.
 Only return the SQL query and nothing else. You need to always join the plane and observation tables on obsID. 
 You also always need to make sure that publisherID from the Plane table is always selected. Always limit to 5 rows.
+Additionally, never use LIKE in your queries.
 {schema}
 Question: {question}
 SQL Query:
@@ -510,19 +475,11 @@ class SQLAgent:
         return df
     def createPreprocessAgent(self):
         # Choose the LLM to use
-        llm2 = ChatOpenAI(model="gpt-4o-mini")
-
-        # Get the react prompt template
-        prompt_template = get_react_prompt_template()
-
-
+        model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         # set the tools
-        #tools = [alternateColumn,checkColumns, alternateValue, checkValuesForCommonColumns]
-        # Temporary: Removing checkColumns for now
-        tools = [alternateColumn, alternateValue, checkValuesForCommonColumns]
-
-        # Construct the ReAct agent
-        agent = create_react_agent(llm2, tools, prompt_template)
+        tools = [checkColumnTable, alternateColumn, alternateValue, valueExistInColumn]
+        prompt = hub.pull("shaylin/chadb-preprocess")
+        agent = create_openai_tools_agent(model, tools, prompt)
 
         # Create an agent executor by passing in the agent and tools
         return AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
